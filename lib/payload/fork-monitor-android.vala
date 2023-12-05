@@ -1,16 +1,4 @@
 namespace Frida {
-#if WINDOWS
-	public class ForkMonitor : Object {
-		public weak ForkHandler handler {
-			get;
-			construct;
-		}
-
-		public ForkMonitor (ForkHandler handler) {
-			Object (handler: handler);
-		}
-	}
-#else
 	public class ForkMonitor : Object, Gum.InvocationListener {
 		public weak ForkHandler handler {
 			get;
@@ -55,7 +43,6 @@ namespace Frida {
 
 			unowned Gum.InvocationListener listener = this;
 
-#if ANDROID
 			if (get_executable_path ().has_prefix ("/system/bin/app_process")) {
 				try {
 					string cmdline;
@@ -74,7 +61,6 @@ namespace Frida {
 				} catch (FileError e) {
 				}
 			}
-#endif
 
 			interceptor.attach (fork_impl, listener, (void *) HookId.FORK);
 			interceptor.replace (vfork_impl, fork_impl);
@@ -92,20 +78,20 @@ namespace Frida {
 		private void on_enter (Gum.InvocationContext context) {
 			var hook_id = (HookId) context.get_listener_function_data ();
 			switch (hook_id) {
-				case FORK:	on_fork_enter (context);	break;
-				case SET_ARGV0:	on_set_argv0_enter (context);	break;
-				case SET_CTX:   on_set_ctx_enter (context);	break;
-				default:	assert_not_reached ();
+				case FORK:      on_fork_enter (context);        break;
+				case SET_ARGV0: on_set_argv0_enter (context);   break;
+				case SET_CTX:   on_set_ctx_enter (context);     break;
+				default:        assert_not_reached ();
 			}
 		}
 
 		private void on_leave (Gum.InvocationContext context) {
 			var hook_id = (HookId) context.get_listener_function_data ();
 			switch (hook_id) {
-				case FORK:	on_fork_leave (context);	break;
-				case SET_ARGV0:	on_set_argv0_leave (context);	break;
-				case SET_CTX:   on_set_ctx_leave (context);	break;
-				default:	assert_not_reached ();
+				case FORK:      on_fork_leave (context);        break;
+				case SET_ARGV0: on_set_argv0_leave (context);   break;
+				case SET_CTX:   on_set_ctx_leave (context);     break;
+				default:        assert_not_reached ();
 			}
 		}
 
@@ -173,15 +159,5 @@ namespace Frida {
 
 		[CCode (has_target = false)]
 		private delegate string * ReleaseStringUTFCharsFunc (void * env, void * str_obj, string * str_utf8);
-	}
-#endif
-
-	public interface ForkHandler : Object {
-		public abstract void prepare_to_fork ();
-		public abstract void recover_from_fork_in_parent ();
-		public abstract void recover_from_fork_in_child (string? identifier);
-
-		public abstract void prepare_to_specialize (string identifier);
-		public abstract void recover_from_specialization (string identifier);
 	}
 }

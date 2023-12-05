@@ -4,7 +4,7 @@ payload_sources = [
   'base-agent-session.vala',
   'script-engine.vala',
   'portal-client.vala',
-  'fork-monitor.vala',
+  'fork-handler.vala',
   'spawn-monitor.vala',
   'spawn-monitor-glue.c',
   'thread-suspend-monitor.vala',
@@ -15,6 +15,14 @@ payload_sources = [
   'fdt-padder.vala',
   'libc-shim.c',
 ]
+
+if host_os_family == 'windows'
+  payload_sources += 'fork-monitor-windows.vala'
+elif host_os == 'android'
+  payload_sources += 'fork-monitor-android.vala'
+else
+  payload_sources += 'fork-monitor-posix.vala'
+endif
 
 if host_os_family == 'linux'
   payload_sources += 'syscall-linux-@0@.S'.format(host_arch)
