@@ -5,8 +5,7 @@ payload_sources = [
   'script-engine.vala',
   'portal-client.vala',
   'fork-handler.vala',
-  'spawn-monitor.vala',
-  'spawn-monitor-glue.c',
+  'spawn-handler.vala',
   'thread-suspend-monitor.vala',
   'thread-suspend-monitor-glue.c',
   'exit-monitor.vala',
@@ -18,10 +17,14 @@ payload_sources = [
 
 if host_os_family == 'windows'
   payload_sources += 'fork-monitor-windows.vala'
+  payload_sources += 'spawn-monitor-windows.vala'
+  payload_sources += 'spawn-monitor-windows-glue.c'
 elif host_os == 'android'
   payload_sources += 'fork-monitor-android.vala'
+  payload_sources += 'spawn-monitor-posix.vala'
 else
   payload_sources += 'fork-monitor-posix.vala'
+  payload_sources += 'spawn-monitor-posix.vala'
 endif
 
 if host_os_family == 'linux'
