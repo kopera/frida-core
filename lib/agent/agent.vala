@@ -94,9 +94,11 @@ namespace Frida.Agent {
 #else
 		private Socket? fork_child_socket;
 #endif
+#if ANDROID
 		private HostChildId specialized_child_id;
 		private uint specialized_injectee_id;
 		private string? specialized_pipe_address;
+#endif
 		private TransitionRecoveryState transition_recovery_state;
 		private Mutex transition_mutex;
 		private Cond transition_cond;
@@ -591,6 +593,7 @@ namespace Frida.Agent {
 			transition_mutex.unlock ();
 		}
 
+#if ANDROID
 		private void prepare_to_specialize (string identifier) {
 			schedule_idle (() => {
 				do_prepare_to_specialize.begin (identifier);
@@ -693,6 +696,7 @@ namespace Frida.Agent {
 			transition_cond.signal ();
 			transition_mutex.unlock ();
 		}
+#endif
 
 		private async void prepare_to_exec (HostChildInfo * info) {
 			yield prepare_for_termination (TerminationReason.EXEC);
