@@ -96,7 +96,10 @@ namespace Frida {
 
 	[DBus (name = "re.frida.AgentController16")]
 	public interface AgentController : Object {
-#if !WINDOWS
+#if WINDOWS
+		public abstract async HostChildId prepare_to_fork (uint parent_pid, Cancellable? cancellable, out uint parent_injectee_id,
+			out uint child_injectee_id, out string child_pipe_address) throws GLib.Error;
+#else
 		public abstract async HostChildId prepare_to_fork (uint parent_pid, Cancellable? cancellable, out uint parent_injectee_id,
 			out uint child_injectee_id, out GLib.Socket child_socket) throws GLib.Error;
 #endif
