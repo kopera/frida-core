@@ -62,6 +62,7 @@ namespace Frida {
 		private uint registration_id;
 		private ServiceConnection helper32;
 		private ServiceConnection? helper64;
+		private Gee.Map<uint, WindowsRemoteHelper> injectee_ids = new Gee.HashMap<uint, WindowsRemoteHelper> ();
 		private void * context;
 
 		public HelperManager (string parent_address, PrivilegeLevel level) {
@@ -130,6 +131,8 @@ namespace Frida {
 		}
 
 		public async void stop (Cancellable? cancellable) throws Error, IOError {
+			injectee_ids.clear ();
+
 			if (helper64 != null) {
 				try {
 					yield helper64.proxy.stop (cancellable);
@@ -161,13 +164,31 @@ namespace Frida {
 				if (helper64 != null && yield helper64.proxy.can_handle_target (pid, cancellable)) {
 					yield helper64.proxy.inject_library_file (pid, path_template, entrypoint, data, dependencies, id,
 						cancellable);
+					injectee_ids[id] = helper64.proxy;
 				} else {
 					yield helper32.proxy.inject_library_file (pid, path_template, entrypoint, data, dependencies, id,
 						cancellable);
+					injectee_ids[id] = helper32.proxy;
 				}
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
+		}
+
+		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
+			var backend = injectee_ids[id];
+			yield backend.demonitor (id, cancellable);
+		}
+
+		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable) throws Error, IOError {
+			var backend = injectee_ids[id];
+			yield backend.demonitor_and_clone_injectee_state (id, clone_id, cancellable);
+			injectee_ids[clone_id] = backend;
+		}
+
+		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
+			var backend = injectee_ids[id];
+			yield backend.recreate_injectee_thread (pid, id, cancellable);
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
@@ -175,6 +196,8 @@ namespace Frida {
 		}
 
 		private void on_uninjected (uint id) {
+			injectee_ids.unset (id);
+
 			uninjected (id);
 		}
 
@@ -294,6 +317,18 @@ namespace Frida {
 		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
 				string[] dependencies, uint id, Cancellable? cancellable) throws Error, IOError {
 			yield backend.inject_library_file (pid, path_template, entrypoint, data, dependencies, id, cancellable);
+		}
+
+		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
+			yield backend.demonitor (id, cancellable);
+		}
+
+		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable) throws Error, IOError {
+			yield backend.demonitor_and_clone_injectee_state (id, clone_id, cancellable);
+		}
+
+		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
+			yield backend.recreate_injectee_thread (pid, id, cancellable);
 		}
 
 		private void on_backend_uninjected (uint id) {

@@ -738,7 +738,7 @@ namespace Frida {
 			if (!injectee_by_pid.has_key (parent_pid))
 				throw new Error.INVALID_ARGUMENT ("No injectee found for PID %u", parent_pid);
 			parent_injectee_id = injectee_by_pid[parent_pid];
-			//  child_injectee_id = yield injector.demonitor_and_clone_state (parent_injectee_id, cancellable);
+			child_injectee_id = yield injector.demonitor_and_clone_state (parent_injectee_id, cancellable);
 
 			var transport = new PipeTransport ();
 			var local_stream_request = Pipe.open (transport.local_address, cancellable);

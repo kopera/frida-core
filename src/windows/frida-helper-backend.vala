@@ -79,6 +79,18 @@ namespace Frida {
 			}
 		}
 
+		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Not supported on windows");
+		}
+
+		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Not supported on windows");
+		}
+
+		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Not supported on windows");
+		}
+
 		private void monitor_remote_thread (uint id, void * instance, void * waitable_thread_handle) {
 			var source = WaitHandleSource.create (waitable_thread_handle, true);
 			source.set_callback (() => {
