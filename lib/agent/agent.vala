@@ -48,7 +48,7 @@ namespace Frida.Agent {
 		private bool stop_thread_on_unload = true;
 
 		private Gum.ThreadId agent_tid;
-		private void * agent_pthread;
+		private void * agent_native_thread;
 		private Thread<bool>? agent_gthread;
 
 		private MainContext main_context;
@@ -237,7 +237,7 @@ namespace Frida.Agent {
 
 		construct {
 			agent_tid = Gum.Process.get_current_thread_id ();
-			agent_pthread = get_current_pthread ();
+			agent_native_thread = get_current_native_thread ();
 
 			main_context = MainContext.default ();
 			main_loop = new MainLoop (main_context);
@@ -364,7 +364,7 @@ namespace Frida.Agent {
 
 		private void run_after_transition () {
 			agent_tid = Gum.Process.get_current_thread_id ();
-			agent_pthread = get_current_pthread ();
+			agent_native_thread = get_current_native_thread ();
 			stop_reason = UNLOAD;
 
 			transition_mutex.lock ();
@@ -495,10 +495,10 @@ namespace Frida.Agent {
 			if (agent_gthread != null) {
 				agent_gthread.join ();
 				agent_gthread = null;
-			} else if (agent_pthread != null) {
-				join_pthread (agent_pthread);
+			} else if (agent_native_thread != null) {
+				join_native_thread (agent_native_thread);
 			}
-			agent_pthread = null;
+			agent_native_thread = null;
 		}
 
 		private async void recreate_agent_thread_after_fork (ForkActor actor) {
