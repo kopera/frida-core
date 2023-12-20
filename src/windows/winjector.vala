@@ -100,6 +100,7 @@ namespace Frida {
 		}
 
 		public async void recreate_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
+			printerr ("winjector: recreate_thread: \033[0;33m%u (pid=%u)\033[0m\n", id, pid);
 			yield helper.recreate_injectee_thread (pid, id, cancellable);
 		}
 

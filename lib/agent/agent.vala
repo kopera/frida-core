@@ -48,7 +48,7 @@ namespace Frida.Agent {
 		private bool stop_thread_on_unload = true;
 
 		private Gum.ThreadId agent_tid;
-		private void * agent_pthread;
+		private void * agent_native_thread;
 		private Thread<bool>? agent_gthread;
 
 		private MainContext main_context;
@@ -243,7 +243,7 @@ namespace Frida.Agent {
 
 		construct {
 			agent_tid = Gum.Process.get_current_thread_id ();
-			agent_pthread = get_current_pthread ();
+			agent_native_thread = get_current_native_thread ();
 
 			main_context = MainContext.default ();
 			main_loop = new MainLoop (main_context);
@@ -370,7 +370,7 @@ namespace Frida.Agent {
 
 		private void run_after_transition () {
 			agent_tid = Gum.Process.get_current_thread_id ();
-			agent_pthread = get_current_pthread ();
+			agent_native_thread = get_current_native_thread ();
 			stop_reason = UNLOAD;
 
 			transition_mutex.lock ();
@@ -382,6 +382,7 @@ namespace Frida.Agent {
 		}
 
 		private void prepare_to_fork () {
+			printerr ("agent (%p): prepare_to_fork\n", this);
 			var fdt_padder = FileDescriptorTablePadder.obtain ();
 
 			schedule_idle (() => {
@@ -404,6 +405,7 @@ namespace Frida.Agent {
 #if WINDOWS
 					fork_child_id = yield controller.prepare_to_fork (fork_parent_pid, null,
 						out fork_parent_injectee_id, out fork_child_injectee_id, out fork_child_pipe_address);
+					printerr ("agent (%p): controller: prepare_to_fork_result: \033[0;33m%u (pid=%u)\033[0m\n", this, fork_parent_injectee_id, fork_parent_pid);
 #else
 					fork_child_id = yield controller.prepare_to_fork (fork_parent_pid, null,
 						out fork_parent_injectee_id, out fork_child_injectee_id, out fork_child_socket);
@@ -421,14 +423,17 @@ namespace Frida.Agent {
 		}
 
 		private void recover_from_fork_in_parent () {
+			printerr ("agent (%p): recover_from_fork_in_parent: \033[0;33m%u (pid=%u)\033[0m\n", this, fork_parent_injectee_id, fork_parent_pid);
 			recover_from_fork (ForkActor.PARENT, null);
 		}
 
 		private void recover_from_fork_in_child (string? identifier) {
-			recover_from_fork (ForkActor.CHILD, identifier);
+			printerr ("agent (%p): recover_from_fork_in_child\n", this);
+			//  recover_from_fork (ForkActor.CHILD, identifier);
 		}
 
 		private void recover_from_fork (ForkActor actor, string? identifier) {
+			printerr ("agent (%p): recover_from_fork: \033[0;33m%s\033[0m\n", this, actor.to_string ());
 			var fdt_padder = FileDescriptorTablePadder.obtain ();
 
 			if (actor == PARENT) {
@@ -473,21 +478,23 @@ namespace Frida.Agent {
 			fdt_padder = null;
 		}
 
-		private static void suspend_subsystems () {
+		private void suspend_subsystems () {
 			GumJS.prepare_to_fork ();
 			Gum.prepare_to_fork ();
 			GIOFork.prepare_to_fork ();
 			GLibFork.prepare_to_fork ();
 		}
 
-		private static void resume_subsystems () {
+		private void resume_subsystems () {
+			printerr ("agent (%p): resume_subsystems\n", this);
 			GLibFork.recover_from_fork_in_parent ();
 			GIOFork.recover_from_fork_in_parent ();
 			Gum.recover_from_fork_in_parent ();
 			GumJS.recover_from_fork_in_parent ();
 		}
 
-		private static void resume_subsystems_in_child () {
+		private void resume_subsystems_in_child () {
+			printerr ("agent (-): resume_subsystems_in_child\n");
 			GLibFork.recover_from_fork_in_child ();
 			GIOFork.recover_from_fork_in_child ();
 			Gum.recover_from_fork_in_child ();
@@ -496,12 +503,15 @@ namespace Frida.Agent {
 
 		private void stop_agent_thread () {
 			if (agent_gthread != null) {
+
 				agent_gthread.join ();
 				agent_gthread = null;
-			} else if (agent_pthread != null) {
-				join_pthread (agent_pthread);
+			} else if (agent_native_thread != null) {
+				join_native_thread (agent_native_thread);
+			} else {
+				assert_not_reached ();
 			}
-			agent_pthread = null;
+			agent_native_thread = null;
 		}
 
 		private async void recreate_agent_thread_after_fork (ForkActor actor) {
@@ -539,6 +549,7 @@ namespace Frida.Agent {
 
 			if (controller != null) {
 				try {
+					printerr ("agent (%p): recreate_agent_thread_after_fork: \033[0;33m%u (pid=%u)\033[0m\n", this, injectee_id, pid);
 					yield controller.recreate_agent_thread (pid, injectee_id, null);
 				} catch (GLib.Error e) {
 					assert_not_reached ();
@@ -557,6 +568,7 @@ namespace Frida.Agent {
 		}
 
 		private async void finish_recovery_from_fork (ForkActor actor, string? identifier) {
+			printerr ("agent (%p): finish_recovery_from_fork: \033[0;33m%u (pid=%u)\033[0m\n", this, fork_parent_injectee_id, fork_parent_pid);
 			if (actor == CHILD && controller != null) {
 				var info = HostChildInfo (fork_child_pid, fork_parent_pid, ChildOrigin.FORK);
 				if (identifier != null)
@@ -699,6 +711,7 @@ namespace Frida.Agent {
 #endif
 
 		private async void prepare_to_exec (HostChildInfo * info) {
+			printerr ("\033[0;33m%s\033[0m\n", "prepare_to_exec");
 			yield prepare_for_termination (TerminationReason.EXEC);
 
 			if (controller == null)
@@ -711,6 +724,7 @@ namespace Frida.Agent {
 		}
 
 		private async void cancel_exec (uint pid) {
+			printerr ("agent (%p): cancel_exec\n", this);
 			unprepare_for_termination ();
 
 			if (controller == null)
@@ -723,6 +737,7 @@ namespace Frida.Agent {
 		}
 
 		private async void acknowledge_spawn (HostChildInfo * info, SpawnStartState start_state) {
+			printerr ("agent (%p): acknowledge_spawn\n", this);
 			if (controller == null)
 				return;
 

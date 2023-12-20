@@ -3,8 +3,8 @@ namespace Frida {
 
 	public extern uint get_process_id ();
 
-	public extern void * get_current_pthread ();
-	public extern void join_pthread (void * thread);
+	public extern void * get_current_native_thread ();
+	public extern void join_native_thread (void * thread);
 
 	public extern void kill_process (uint pid);
 

@@ -24,20 +24,23 @@ frida_get_process_id (void)
 }
 
 gpointer
-frida_get_current_pthread (void)
+frida_get_current_native_thread (void)
 {
 #ifndef HAVE_WINDOWS
   return (gpointer) pthread_self ();
 #else
-  return NULL;
+  return (gpointer) GetCurrentThread();
 #endif
 }
 
 void
-frida_join_pthread (gpointer pthread)
+frida_join_native_thread (gpointer thread)
 {
 #ifndef HAVE_WINDOWS
-  pthread_join ((pthread_t) pthread, NULL);
+  pthread_join ((pthread_t) thread, NULL);
+#else
+  WaitForSingleObject ((HANDLE) thread, INFINITE);
+  CloseHandle ((HANDLE) thread);
 #endif
 }
 

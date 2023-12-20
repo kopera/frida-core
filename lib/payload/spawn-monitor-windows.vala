@@ -156,6 +156,14 @@ namespace Frida {
 
 		private void on_msys_fork_leave (Gum.InvocationContext context) {
 			create_process_internal_w_caller_is_internal.set ((void *) false);
+
+			int result = (int) context.get_return_value ();
+			if (result > 0) {
+				var parent_pid = get_process_id ();
+				var child_pid = result;
+				var info = HostChildInfo (child_pid, parent_pid, ChildOrigin.SPAWN);
+				handler.on_spawn_created ();
+			}
 		}
 
 		// msys spawnve
@@ -166,11 +174,11 @@ namespace Frida {
 			invocation.mode = (SpawnMode)(((int) context.get_nth_argument (0)) & 0xfff);
 			invocation.pid = Frida.get_process_id ();
 
-			unowned string? path = (string?) context.get_nth_argument (1);
-			var argv = parse_strv ((string **) context.get_nth_argument (2));
-			var envp = parse_strv ((string **) context.get_nth_argument (3));
-
 			if (invocation.mode == SpawnMode.OVERLAY) {
+				unowned string? path = (string?) context.get_nth_argument (1);
+				var argv = parse_strv ((string **) context.get_nth_argument (2));
+				var envp = parse_strv ((string **) context.get_nth_argument (3));
+
 				var info = HostChildInfo (invocation.pid, invocation.pid, ChildOrigin.EXEC);
 				fill_child_info_path_argv_and_envp (ref info, path, argv, envp);
 

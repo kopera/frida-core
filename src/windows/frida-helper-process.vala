@@ -67,6 +67,7 @@ namespace Frida {
 					yield inprocess_backend.inject_library_file (pid, path_template, entrypoint, data, dependencies,
 						id, cancellable);
 					injectee_ids[id] = inprocess_backend;
+					printerr ("windows: helper-process: on_injected: \033[0;33m%u\033[0m\n", id);
 					return;
 				}
 			} catch (Error e) {
@@ -83,6 +84,7 @@ namespace Frida {
 					yield normal_helper.inject_library_file (pid, path_template, entrypoint, data, dependencies, id,
 						cancellable);
 					injectee_ids[id] = normal_helper;
+					printerr ("windows: helper-process: on_injected: \033[0;33m%u\033[0m\n", id);
 					return;
 				} catch (Error e) {
 					if (!(e is Error.PERMISSION_DENIED))
@@ -100,6 +102,7 @@ namespace Frida {
 			}
 			yield elevated_helper.inject_library_file (pid, path_template, entrypoint, data, dependencies, id, cancellable);
 			injectee_ids[id] = elevated_helper;
+			printerr ("windows: helper-process: on_injected: \033[0;33m%u\033[0m\n", id);
 		}
 
 		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
@@ -124,6 +127,7 @@ namespace Frida {
 		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
 			var helper = injectee_ids[id];
 			try {
+				printerr ("windows: helper-process: recreate_injectee_thread: \033[0;33m%u (pid=%u, helper=%p)\033[0m\n", id, pid, helper);
 				yield helper.recreate_injectee_thread (pid, id, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
@@ -131,6 +135,7 @@ namespace Frida {
 		}
 
 		private void on_uninjected (uint id) {
+			printerr ("windows: helper-process: on_uninjected: \033[0;33m%u\033[0m\n", id);
 			injectee_ids.unset (id);
 
 			uninjected (id);
@@ -417,6 +422,7 @@ namespace Frida {
 		}
 
 		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
+			printerr ("windows: helper-instance: recreate_injectee_thread: \033[0;33m%u (pid=%u)\033[0m\n", id, pid);
 			try {
 				yield proxy.recreate_injectee_thread (pid, id, cancellable);
 			} catch (GLib.Error e) {
