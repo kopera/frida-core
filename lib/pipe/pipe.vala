@@ -74,6 +74,7 @@ namespace Frida {
 		private OutputStream output;
 
 		public static Future<WindowsPipe> open (string address, Cancellable? cancellable) {
+			printerr ("opening pipe: %s\n", address);
 			var promise = new Promise<WindowsPipe> ();
 
 			try {
@@ -106,6 +107,7 @@ namespace Frida {
 		}
 
 		public override bool close (Cancellable? cancellable = null) throws IOError {
+			printerr ("c@@@@@@@@@losing pipe: %s\n", address);
 			return _close_backend (backend);
 		}
 

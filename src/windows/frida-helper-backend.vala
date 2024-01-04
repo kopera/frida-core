@@ -96,15 +96,15 @@ namespace Frida {
 		private void monitor_remote_thread (uint id, void * instance, void * waitable_thread_handle) {
 			var source = WaitHandleSource.create (waitable_thread_handle, true);
 			source.set_callback (() => {
-				bool is_resident;
-				_free_inject_instance (instance, out is_resident);
+				//  bool is_resident;
+				//  _free_inject_instance (instance, out is_resident);
 
-				printerr ("thread exited %u\n", id);
-				uninjected (id);
+				printerr ("thread exited %u (ignored)\n", id);
+				//  uninjected (id);
 
-				pending--;
-				if (close_request != null && pending == 0)
-					close_request.resolve (true);
+				//  pending--;
+				//  if (close_request != null && pending == 0)
+				//  	close_request.resolve (true);
 
 				return false;
 			});
