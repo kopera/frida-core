@@ -765,6 +765,26 @@ namespace Frida {
 
 			return id;
 		}
+#else
+		public async HostChildId prepare_to_fork (uint parent_pid, Cancellable? cancellable, out uint parent_injectee_id,
+				out uint child_injectee_id, out string child_pipe_address) throws Error, IOError {
+			if (!injectee_by_pid.has_key (parent_pid))
+				throw new Error.INVALID_ARGUMENT ("No injectee found for PID %u", parent_pid);
+			parent_injectee_id = injectee_by_pid[parent_pid];
+			child_injectee_id = yield injector.demonitor_and_clone_state (parent_injectee_id, cancellable);
+
+			var transport = new PipeTransport ();
+			var local_stream_request = Pipe.open (transport.local_address, cancellable);
+			var local_stream = yield local_stream_request.wait_async (io_cancellable);
+
+			var id = HostChildId (next_host_child_id++);
+
+			start_child_connection.begin (id, local_stream);
+
+			child_pipe_address = transport.remote_address;
+
+			return id;
+		}
 #endif
 
 		public async HostChildId prepare_to_specialize (uint pid, string identifier, Cancellable? cancellable,

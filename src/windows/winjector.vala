@@ -90,15 +90,17 @@ namespace Frida {
 		}
 
 		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
-			throw new Error.NOT_SUPPORTED ("Not supported on this OS");
+			yield helper.demonitor (id, cancellable);
 		}
 
 		public async uint demonitor_and_clone_state (uint id, Cancellable? cancellable) throws Error, IOError {
-			throw new Error.NOT_SUPPORTED ("Not supported on this OS");
+			uint clone_id = next_injectee_id++;
+			yield helper.demonitor_and_clone_injectee_state (id, clone_id, cancellable);
+			return clone_id;
 		}
 
 		public async void recreate_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
-			throw new Error.NOT_SUPPORTED ("Not supported on this OS");
+			yield helper.recreate_injectee_thread (pid, id, cancellable);
 		}
 
 		public bool any_still_injected () {
