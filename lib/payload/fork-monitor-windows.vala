@@ -1,5 +1,5 @@
 namespace Frida {
-	public class ForkMonitor : Object, Gum.InvocationListener {
+	public class ForkMonitor : Object {
 		public weak ForkHandler handler {
 			get;
 			construct;
