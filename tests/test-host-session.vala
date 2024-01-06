@@ -294,6 +294,11 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Windows.create_process.begin (h as Harness));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/HostSession/Windows/ChildGating/msys-fork", () => {
+			var h = new Harness ((h) => Windows.msys_fork.begin (h as Harness));
+			h.run ();
+		});
 #endif
 
 		GLib.Test.add_func ("/HostSession/resource-leaks", () => {
@@ -3330,6 +3335,130 @@ namespace Frida.HostSessionTest {
 			}
 		}
 
+		private static async void msys_fork (Harness h) {
+			if (!GLib.Test.slow ()) {
+				stdout.printf ("<run in slow mode> ");
+				h.done ();
+				return;
+			}
+
+			var target_path = "C:\\Program Files\\Git\\bin\\bash.exe";
+			//var target_path = "C:\\Users\\oleav\\Tools\\PortableGit-2.43.0\\bin\\bash.exe";
+
+			try {
+				var device_manager = new DeviceManager ();
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+
+				Child? the_child = null;
+				Child? the_grandchild = null;
+				string? grandchild_detach_reason = null;
+				bool waiting = false;
+
+				if (GLib.Test.verbose ()) {
+					device.output.connect ((pid, fd, data) => {
+						var chars = data.get_data ();
+						var len = chars.length;
+						if (len == 0) {
+							printerr ("[pid=%u fd=%d EOF]\n", pid, fd);
+							return;
+						}
+
+						var buf = new uint8[len + 1];
+						Memory.copy (buf, chars, len);
+						buf[len] = '\0';
+						string message = (string) buf;
+
+						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
+					});
+				}
+				device.child_added.connect (child => {
+					the_child = child;
+					if (waiting)
+						msys_fork.callback ();
+				});
+
+				var options = new SpawnOptions ();
+				options.argv = { target_path, "-c", "ls" };
+				var parent_pid = yield device.spawn (target_path, options);
+				var parent_session = yield device.attach (parent_pid);
+				parent_session.detached.connect (reason => {
+					if (waiting)
+						msys_fork.callback ();
+				});
+				yield parent_session.enable_child_gating ();
+
+				yield device.resume (parent_pid);
+
+				while (the_child == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				printerr ("got the_child=%p\n", the_child);
+				assert_true (the_child.pid != parent_pid);
+				assert_true (the_child.parent_pid == parent_pid);
+				assert_true (the_child.origin == SPAWN);
+				assert_null (the_child.identifier);
+				assert_nonnull (the_child.path);
+				assert_true (Path.get_basename (the_child.path).down () == "bash.exe");
+				assert_nonnull (the_child.argv);
+				assert_null (the_child.envp);
+
+				var child_session = yield device.attach (the_child.pid);
+				child_session.detached.connect (reason => {
+					if (waiting)
+						msys_fork.callback ();
+				});
+				yield child_session.enable_child_gating ();
+
+				printerr ("Hit ENTER to continue\n");
+				stdin.read_line ();
+
+				printerr ("Calling resume\n");
+
+				yield device.resume (the_child.pid);
+
+				printerr ("waiting for the_grandchild\n");
+				while (the_grandchild == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				printerr ("got the_grandchild=%p\n", the_grandchild);
+				assert_true (the_grandchild.pid != the_child.pid);
+				assert_true (the_grandchild.parent_pid == the_child.pid);
+				assert_true (the_grandchild.origin == SPAWN);
+				assert_null (the_grandchild.identifier);
+				assert_nonnull (the_grandchild.path);
+				assert_true (Path.get_basename (the_grandchild.path).down () == "ls.exe");
+				assert_nonnull (the_grandchild.argv);
+				assert_null (the_grandchild.envp);
+
+				var grandchild_session = yield device.attach (the_grandchild.pid);
+				grandchild_session.detached.connect (reason => {
+					grandchild_detach_reason = reason.to_string ();
+					if (waiting)
+						msys_fork.callback ();
+				});
+
+				yield device.resume (the_grandchild.pid);
+
+				while (grandchild_detach_reason == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (grandchild_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+
+				yield device_manager.close ();
+
+				h.done ();
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+		}
+
 	}
 #endif
 
@@ -3800,7 +3929,7 @@ namespace Frida.HostSessionTest {
 			private set;
 		}
 
-		private uint timeout = 90;
+		private uint timeout = 0;
 
 		private Gee.ArrayList<HostSessionProvider> available_providers = new Gee.ArrayList<HostSessionProvider> ();
 
