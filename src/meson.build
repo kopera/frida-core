@@ -62,8 +62,12 @@ if have_local_backend
     ]
     helper_backend_vala_args = base_vala_args
     helper_backend = static_library('frida-helper-backend', helper_backend_sources,
-      vala_args: helper_backend_vala_args,
       c_args: frida_component_cflags,
+      vala_args: [
+        helper_backend_vala_args,
+        gum_vala_args,
+        '--pkg=windows',
+      ],
       dependencies: [gio_dep, gee_dep, gum_dep, base_dep],
     )
     backend_libs += helper_backend

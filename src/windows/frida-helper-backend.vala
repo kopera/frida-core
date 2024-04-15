@@ -65,18 +65,97 @@ namespace Frida {
 				target_dependent_path = path;
 			}
 
-			void * instance, waitable_thread_handle;
-			_inject_library_file (pid, target_dependent_path, entrypoint, data, out instance, out waitable_thread_handle);
-			if (waitable_thread_handle != null) {
-				pending++;
+			var process = open_process (pid);
+			try {
+				yield prepare_target (pid, process, cancellable);
 
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					monitor_remote_thread (id, instance, waitable_thread_handle);
-					return false;
-				});
-				source.attach (main_context);
+				void * instance, waitable_thread_handle;
+				_inject_library_file (process, target_dependent_path, entrypoint, data, out instance, out waitable_thread_handle);
+				if (waitable_thread_handle != null) {
+					pending++;
+
+					var source = new IdleSource ();
+					source.set_callback (() => {
+						monitor_remote_thread (id, instance, waitable_thread_handle);
+						return false;
+					});
+					source.attach (main_context);
+				}
+			} finally {
+				process.close ();
 			}
+		}
+
+		private async void prepare_target (uint pid, Windows.ProcessHandle process, Cancellable? cancellable) {
+			SourceFunc callback = prepare_target.callback;
+			new Thread<void>("frida-helper-backend-prepare-target", () => {
+				var has_msys = false;
+
+				if (Windows.Debug.start (pid)) {
+					while (true) {
+						Windows.Debug.Event event;
+						if (!Windows.Debug.wait (out event, 0)) {
+							var is_timeout = Windows.Error.get_last () != Windows.Error.SEM_TIMEOUT;
+							var is_cancelled = cancellable != null && cancellable.is_cancelled ();
+							if (is_timeout|| is_cancelled)
+								break;
+
+							continue;
+						}
+
+						if (event.code == Windows.Debug.EventCode.LOAD_DLL) {
+							var image_full_path = event.load_dll.get_image_name (process);
+							if (image_full_path != null) {
+								var image_basename = Path.get_basename (image_full_path);
+								if (image_basename.ascii_casecmp("msys-2.0.dll") == 0) {
+									has_msys = true;
+								}
+							}
+
+							event.load_dll.handle.close ();
+						}
+		
+						if (event.code == Windows.Debug.EventCode.EXCEPTION) {
+							// When the debugger starts a new target application, an initial breakpoint automatically
+							// occurs after the main image and all statically-linked DLLs are loaded before any DLL
+							// initialization routines are called.
+							//
+							// At this point, we can consider the application to be safely initialized, unless it is
+							// msys/cygwin based.
+							//
+							// If the target process uses msys, we wait for it to be fully initialized. Ideally, we
+							// would wait for the `cygwin_finished_initializing` variable to be set, however, if we look
+							// at the source code, we notice that it makes a call to `SetThreadName` right before
+							// setting the variable:
+							// https://github.com/cygwin/cygwin/blob/579064bf4d408e99ed7556f36a3050c7ee99dee6/winsup/cygwin/dcrt0.cc#L944
+							//
+							// `SetThreadName` is implemented using a `RaiseException` as specified in:
+							// https://msdn.microsoft.com/en-us/library/xcb2z8hs.aspx)
+							//
+							// This allows us to simply wait for the right exception. ALternatively, we would need to
+							// rely on debug symbols to find the memory location of `cygwin_finished_initializing` and
+							// set a hardware breakpoint there.
+							if (!has_msys
+									|| event.exception.record.code == 0x406D1388
+									|| (Windows.Debug.ExceptionEvent.Flags.NONCONTINUABLE in event.exception.record.flags)) {
+								Windows.Debug.@continue(event.process_id, event.thread_id,
+									Windows.Debug.ContinueStatus.EXCEPTION_NOT_HANDLED);
+								break;
+							}
+						}
+
+						Windows.Debug.@continue(event.process_id, event.thread_id,
+							Windows.Debug.ContinueStatus.CONTINUE);
+					}
+		
+					Windows.Debug.set_process_kill_on_exit (false);
+					Windows.Debug.stop (pid);
+				}
+
+				Idle.add((owned) callback);
+			});
+
+			yield;
 		}
 
 		private void monitor_remote_thread (uint id, void * instance, void * waitable_thread_handle) {
@@ -96,9 +175,11 @@ namespace Frida {
 			source.attach (main_context);
 		}
 
-		protected extern static void _inject_library_file (uint32 pid, string path, string entrypoint, string data,
+		private extern static Windows.ProcessHandle open_process (uint pid) throws Error;
+
+		private extern static void _inject_library_file (Windows.ProcessHandle handle, string path, string entrypoint, string data,
 			out void * inject_instance, out void * waitable_thread_handle) throws Error;
-		protected extern static void _free_inject_instance (void * inject_instance, out bool is_resident);
+		private extern static void _free_inject_instance (void * inject_instance, out bool is_resident);
 	}
 
 	private class AssetDirectory {

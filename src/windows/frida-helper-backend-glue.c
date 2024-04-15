@@ -8,13 +8,6 @@
 #include <tlhelp32.h>
 #include <strsafe.h>
 
-#define CHECK_OS_RESULT(n1, cmp, n2, op) \
-  if (!((n1) cmp (n2))) \
-  { \
-    failed_operation = op; \
-    goto os_failure; \
-  }
-
 #define CHECK_NT_RESULT(n1, cmp, n2, op) \
   if (!((n1) cmp (n2))) \
   { \
@@ -82,9 +75,35 @@ static gboolean frida_remote_worker_context_collect_kernel32_export (const GumEx
 
 static gboolean frida_file_exists_and_is_readable (const WCHAR * filename);
 
+HANDLE
+frida_windows_helper_backend_open_process (guint32 pid, GError ** error)
+{
+  DWORD desired_access;
+  HANDLE process_handle;
+
+  frida_enable_debug_privilege ();
+
+  desired_access =
+      PROCESS_DUP_HANDLE    | /* duplicatable handle                  */
+      PROCESS_VM_OPERATION  | /* for VirtualProtectEx and mem access  */
+      PROCESS_VM_READ       | /*   ReadProcessMemory                  */
+      PROCESS_VM_WRITE      | /*   WriteProcessMemory                 */
+      PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION;
+
+  process_handle = OpenProcess (desired_access, FALSE, pid);
+  if (process_handle == NULL) {
+    DWORD os_error;
+
+    os_error = GetLastError ();
+    frida_propagate_open_process_error (pid, os_error, error);
+  }
+
+  return process_handle;
+}
+
 void
-_frida_windows_helper_backend_inject_library_file (guint32 pid, const gchar * path, const gchar * entrypoint, const gchar * data,
-    void ** inject_instance, void ** waitable_thread_handle, GError ** error)
+_frida_windows_helper_backend_inject_library_file (HANDLE process_handle, const gchar * path, const gchar * entrypoint,
+    const gchar * data, void ** inject_instance, void ** waitable_thread_handle, GError ** error)
 {
   gboolean success = FALSE;
   const gchar * failed_operation;
@@ -104,17 +123,13 @@ _frida_windows_helper_backend_inject_library_file (guint32 pid, const gchar * pa
   if (!frida_file_exists_and_is_readable (details.dll_path))
     goto invalid_path;
 
-  frida_enable_debug_privilege ();
-
-  desired_access =
-      PROCESS_DUP_HANDLE    | /* duplicatable handle                  */
-      PROCESS_VM_OPERATION  | /* for VirtualProtectEx and mem access  */
-      PROCESS_VM_READ       | /*   ReadProcessMemory                  */
-      PROCESS_VM_WRITE      | /*   WriteProcessMemory                 */
-      PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION;
-
-  details.process_handle = OpenProcess (desired_access, FALSE, pid);
-  CHECK_OS_RESULT (details.process_handle, !=, NULL, "OpenProcess");
+  DuplicateHandle(GetCurrentProcess(), 
+                    process_handle, 
+                    GetCurrentProcess(),
+                    &details.process_handle, 
+                    0,
+                    FALSE,
+                    DUPLICATE_SAME_ACCESS);
 
   if (!frida_remote_worker_context_init (&rwc, &details, error))
     goto beach;
@@ -157,27 +172,6 @@ invalid_path:
         path);
     goto beach;
   }
-os_failure:
-  {
-    DWORD os_error;
-
-    os_error = GetLastError ();
-
-    if (details.process_handle == NULL)
-    {
-      frida_propagate_open_process_error (pid, os_error, error);
-    }
-    else
-    {
-      g_set_error (error,
-          FRIDA_ERROR,
-          (os_error == ERROR_ACCESS_DENIED) ? FRIDA_ERROR_PERMISSION_DENIED : FRIDA_ERROR_NOT_SUPPORTED,
-          "Unexpected error while attaching to process with pid %u (%s returned 0x%08lx)",
-          pid, failed_operation, os_error);
-    }
-
-    goto beach;
-  }
 nt_failure:
   {
     gint code;
@@ -190,8 +184,8 @@ nt_failure:
     g_set_error (error,
         FRIDA_ERROR,
         code,
-        "Unexpected error while attaching to process with pid %u (%s returned 0x%08lx)",
-        pid, failed_operation, nt_status);
+        "Unexpected error while attaching to process (%s returned 0x%08lx)",
+        failed_operation, nt_status);
     goto beach;
   }
 
