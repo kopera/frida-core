@@ -301,6 +301,11 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Windows.create_process.begin (h as Harness));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/HostSession/Windows/ChildGating/msys-fork", () => {
+			var h = new Harness ((h) => Windows.msys_fork.begin (h as Harness));
+			h.run ();
+		});
 #endif
 
 		GLib.Test.add_func ("/HostSession/resource-leaks", () => {
@@ -3338,6 +3343,85 @@ namespace Frida.HostSessionTest {
 				yield device_manager.close ();
 
 				h.done ();
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+		}
+
+		private static async void msys_fork (Harness h) {
+			if (!GLib.Test.slow ()) {
+				stdout.printf ("<skipping, run in slow mode with target application running> ");
+				h.done ();
+				return;
+			}
+
+			var target_path = "C:\\Program Files\\Git\\bin\\bash.exe";
+
+			try {
+				var device_manager = new DeviceManager ();
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+
+				var children = new Gee.ArrayQueue<Child> ();
+				var processes = 1;
+				bool waiting = false;
+
+				device.child_added.connect (child => {
+					processes += 1;
+					children.offer (child);
+					if (waiting)
+						msys_fork.callback ();
+				});
+
+				for (var i = 0; i < 1; i++) {
+					// parent
+					{
+						var options = new SpawnOptions ();
+						options.cwd = "C:\\";
+						options.argv = { target_path, "-c", "ls | grep a | grep b | grep c" };
+						var parent_pid = yield device.spawn (target_path, options);
+						if (GLib.Test.verbose ())
+							printerr ("process started pid=%u path='%s'\n", parent_pid, target_path);
+						var parent_session = yield device.attach (parent_pid);
+						parent_session.detached.connect (reason => {
+							processes -= 1;
+							if (waiting)
+								msys_fork.callback ();
+						});
+						yield parent_session.enable_child_gating ();
+
+						yield device.resume (parent_pid);
+					}
+
+					// child N
+					while (processes > 0) {
+						var child = children.poll ();
+						if (child == null) {
+							waiting = true;
+							yield;
+							waiting = false;
+						} else {
+							if (GLib.Test.verbose ())
+								printerr ("process started pid=%u path='%s'\n", child.pid, child.path);
+							var child_session = yield device.attach (child.pid);
+							child_session.detached.connect (reason => {
+								if (GLib.Test.verbose ())
+									printerr ("process terminated pid=%u path='%s' reason=%s\n", child.pid, child.path, reason.to_string());
+								processes -= 1;
+								if (waiting)
+									msys_fork.callback ();
+							});
+
+							yield child_session.enable_child_gating ();
+							yield device.resume (child.pid);
+						}
+					}
+
+				}
+
+				yield device_manager.close ();
+
+				h.done();
 			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
