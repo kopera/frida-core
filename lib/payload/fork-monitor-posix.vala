@@ -1,16 +1,4 @@
 namespace Frida {
-#if WINDOWS
-	public class ForkMonitor : Object {
-		public weak ForkHandler handler {
-			get;
-			construct;
-		}
-
-		public ForkMonitor (ForkHandler handler) {
-			Object (handler: handler);
-		}
-	}
-#else
 	public class ForkMonitor : Object, Gum.InvocationListener {
 		public weak ForkHandler handler {
 			get;
@@ -173,15 +161,5 @@ namespace Frida {
 
 		[CCode (has_target = false)]
 		private delegate string * ReleaseStringUTFCharsFunc (void * env, void * str_obj, string * str_utf8);
-	}
-#endif
-
-	public interface ForkHandler : Object {
-		public abstract void prepare_to_fork ();
-		public abstract void recover_from_fork_in_parent ();
-		public abstract void recover_from_fork_in_child (string? identifier);
-
-		public abstract void prepare_to_specialize (string identifier);
-		public abstract void recover_from_specialization (string identifier);
 	}
 }

@@ -4,7 +4,7 @@ payload_sources = [
   'base-agent-session.vala',
   'script-engine.vala',
   'portal-client.vala',
-  'fork-monitor.vala',
+  'fork-handler.vala',
   'spawn-monitor.vala',
   'spawn-monitor-glue.c',
   'thread-suspend-monitor.vala',
@@ -18,6 +18,12 @@ payload_sources = [
 
 if host_os_family == 'linux'
   payload_sources += 'syscall-linux-@0@.S'.format(host_arch)
+endif
+
+if host_os_family == 'windows'
+  payload_sources += 'fork-monitor-windows.vala'
+else
+  payload_sources += 'fork-monitor-posix.vala'
 endif
 
 extra_vala_args = []
