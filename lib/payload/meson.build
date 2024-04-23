@@ -5,8 +5,7 @@ payload_sources = [
   'script-engine.vala',
   'portal-client.vala',
   'fork-handler.vala',
-  'spawn-monitor.vala',
-  'spawn-monitor-glue.c',
+  'spawn-handler.vala',
   'thread-suspend-monitor.vala',
   'thread-suspend-monitor-glue.c',
   'exit-monitor.vala',
@@ -22,8 +21,11 @@ endif
 
 if host_os_family == 'windows'
   payload_sources += 'fork-monitor-windows.vala'
+  payload_sources += 'spawn-monitor-windows.vala'
+  payload_sources += 'spawn-monitor-windows-glue.c'
 else
   payload_sources += 'fork-monitor-posix.vala'
+  payload_sources += 'spawn-monitor-posix.vala'
 endif
 
 extra_vala_args = []
