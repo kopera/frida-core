@@ -14,6 +14,7 @@ if host_os == 'windows'
     'simple-agent-windows-x86.dll',
     'resident-agent-windows-x86_64.dll',
     'resident-agent-windows-x86.dll',
+    'msys-fork.sh',
   ]
 endif
 

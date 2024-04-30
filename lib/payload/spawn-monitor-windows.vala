@@ -13,6 +13,13 @@ namespace Frida {
 		private Mutex mutex;
 		private Cond cond;
 
+		private static Private create_process_internal_w_caller_is_internal = new Private ();
+
+		private enum HookId {
+			CREATE_PROCESS_INTERNAL_W,
+			MSYS_FORK,
+		}
+
 		public enum OperationStatus {
 			QUEUED,
 			COMPLETED
@@ -23,13 +30,20 @@ namespace Frida {
 		}
 
 		construct {
+			create_process_internal_w_caller_is_internal.set ((void *) false);
+
 			var interceptor = Gum.Interceptor.obtain ();
 
 			var create_process_internal = Gum.Module.find_export_by_name ("kernelbase.dll", "CreateProcessInternalW");
 			if (create_process_internal == 0)
 				create_process_internal = Gum.Module.find_export_by_name ("kernel32.dll", "CreateProcessInternalW");
 			assert (create_process_internal != 0);
-			interceptor.attach ((void *) create_process_internal, this);
+			interceptor.attach ((void *) create_process_internal, this, (void *) HookId.CREATE_PROCESS_INTERNAL_W);
+
+			var msys_fork = (void *) Gum.Module.find_export_by_name ("msys-2.0.dll", "fork");
+			if (msys_fork != null) {
+				interceptor.attach (msys_fork, this, (void *) HookId.MSYS_FORK);
+			}
 		}
 
 		public override void dispose () {
@@ -41,6 +55,29 @@ namespace Frida {
 		}
 
 		private void on_enter (Gum.InvocationContext context) {
+			var hook_id = (HookId) context.get_listener_function_data ();
+			switch (hook_id) {
+				case CREATE_PROCESS_INTERNAL_W: on_create_process_internal_w_enter (context); break;
+				case MSYS_FORK:                 on_msys_fork_enter (context); break;
+				default:                        assert_not_reached ();
+			}
+		}
+
+		private void on_leave (Gum.InvocationContext context) {
+			var hook_id = (HookId) context.get_listener_function_data ();
+			switch (hook_id) {
+				case CREATE_PROCESS_INTERNAL_W: on_create_process_internal_w_leave (context); break;
+				case MSYS_FORK:                 on_msys_fork_leave (context); break;
+				default:                        assert_not_reached ();
+			}
+		}
+
+		// CreateProcessInternalW
+		private void on_create_process_internal_w_enter (Gum.InvocationContext context) {
+			if ((bool) create_process_internal_w_caller_is_internal.get ())
+				return;
+
+			printerr ("spawn-monitor[windows].on_create_process_internal_w_enter\n");
 			Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 
 			invocation.application_name = (string16?) context.get_nth_argument (1);
@@ -54,7 +91,11 @@ namespace Frida {
 			invocation.process_info = context.get_nth_argument (10);
 		}
 
-		private void on_leave (Gum.InvocationContext context) {
+		private void on_create_process_internal_w_leave (Gum.InvocationContext context) {
+			if ((bool) create_process_internal_w_caller_is_internal.get ())
+				return;
+
+			printerr ("spawn-monitor[windows].on_create_process_internal_w_leave\n");
 			var success = (bool) context.get_return_value ();
 			if (!success)
 				return;
@@ -103,6 +144,15 @@ namespace Frida {
 				_resume_thread (invocation.process_info.thread);
 		}
 
+		// msys fork
+		private void on_msys_fork_enter (Gum.InvocationContext context) {
+			create_process_internal_w_caller_is_internal.set ((void *) true);
+		}
+
+		private void on_msys_fork_leave (Gum.InvocationContext context) {
+			create_process_internal_w_caller_is_internal.set ((void *) false);
+		}
+
 		private void on_spawn_created (HostChildInfo * info, SpawnStartState start_state) {
 			mutex.lock ();
 
@@ -147,8 +197,8 @@ namespace Frida {
 
 		[Flags]
 		private enum CreateProcessFlags {
-			CREATE_SUSPENDED            = 0x00000004,
-			CREATE_UNICODE_ENVIRONMENT  = 0x00000400,
+			CREATE_SUSPENDED		= 0x00000004,
+			CREATE_UNICODE_ENVIRONMENT	= 0x00000400,
 		}
 
 		public extern static uint32 _resume_thread (void * thread);

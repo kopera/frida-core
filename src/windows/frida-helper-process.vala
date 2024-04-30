@@ -12,6 +12,8 @@ namespace Frida {
 
 		private ResourceStore _resource_store;
 
+		private Gee.Map<uint, WindowsHelper> injectee_ids = new Gee.HashMap<uint, WindowsHelper> ();
+
 		public WindowsHelperProcess (TemporaryDirectory tempdir) {
 			Object (tempdir: tempdir);
 		}
@@ -23,6 +25,8 @@ namespace Frida {
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
+			injectee_ids.clear ();
+
 			inprocess_backend.uninjected.disconnect (on_uninjected);
 			_normal_factory.uninjected.disconnect (on_uninjected);
 			_elevated_factory.uninjected.disconnect (on_uninjected);
@@ -62,6 +66,7 @@ namespace Frida {
 				if (remote_arch == local_arch) {
 					yield inprocess_backend.inject_library_file (pid, path_template, entrypoint, data, dependencies,
 						id, cancellable);
+					injectee_ids[id] = inprocess_backend;
 					return;
 				}
 			} catch (Error e) {
@@ -77,6 +82,7 @@ namespace Frida {
 				try {
 					yield normal_helper.inject_library_file (pid, path_template, entrypoint, data, dependencies, id,
 						cancellable);
+					injectee_ids[id] = normal_helper;
 					return;
 				} catch (Error e) {
 					if (!(e is Error.PERMISSION_DENIED))
@@ -93,9 +99,41 @@ namespace Frida {
 					"Unable to access process with pid %u from the current user account".printf (pid));
 			}
 			yield elevated_helper.inject_library_file (pid, path_template, entrypoint, data, dependencies, id, cancellable);
+			injectee_ids[id] = elevated_helper;
+		}
+
+
+		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
+			var helper = injectee_ids[id];
+			try {
+				yield helper.demonitor (id, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable) throws Error, IOError {
+			var helper = injectee_ids[id];
+			try {
+				yield helper.demonitor_and_clone_injectee_state (id, clone_id, cancellable);
+				injectee_ids[clone_id] = helper;
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
+			var helper = injectee_ids[id];
+			try {
+				yield helper.recreate_injectee_thread (pid, id, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
 		}
 
 		private void on_uninjected (uint id) {
+			injectee_ids.unset (id);
+
 			uninjected (id);
 		}
 	}
@@ -237,9 +275,8 @@ namespace Frida {
 		private extern static void * spawn (string path, string parameters, PrivilegeLevel level) throws Error;
 	}
 
-	private class HelperInstance {
+	private class HelperInstance : Object, WindowsHelper {
 		public signal void terminated ();
-		public signal void uninjected (uint id);
 
 		public bool is_alive {
 			get {
@@ -359,6 +396,31 @@ namespace Frida {
 			try {
 				yield proxy.inject_library_file (pid, path_template, entrypoint, data, dependencies, id, cancellable);
 				injectee_ids.add (id);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+
+		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
+			try {
+				yield proxy.demonitor (id, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable) throws Error, IOError {
+			try {
+				yield proxy.demonitor_and_clone_injectee_state (id, clone_id, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
+			try {
+				yield proxy.recreate_injectee_thread (pid, id, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}

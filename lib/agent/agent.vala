@@ -90,7 +90,9 @@ namespace Frida.Agent {
 		private HostChildId fork_child_id;
 		private uint fork_parent_injectee_id;
 		private uint fork_child_injectee_id;
-		private Socket fork_child_socket;
+#if !WINDOWS
+		private Socket? fork_child_socket;
+#endif
 		private HostChildId specialized_child_id;
 		private uint specialized_injectee_id;
 		private string? specialized_pipe_address;
@@ -392,12 +394,15 @@ namespace Frida.Agent {
 		private async void do_prepare_to_fork () {
 			stop_reason = PROCESS_TRANSITION;
 
-#if !WINDOWS
 			if (controller != null) {
 				try {
 					fork_parent_pid = get_process_id ();
+#if !WINDOWS
 					fork_child_id = yield controller.prepare_to_fork (fork_parent_pid, null,
 						out fork_parent_injectee_id, out fork_child_injectee_id, out fork_child_socket);
+#else
+					yield controller.prepare_to_fork (fork_parent_pid, null, out fork_parent_injectee_id);
+#endif
 				} catch (GLib.Error e) {
 #if ANDROID
 					error ("Oops, SELinux rule probably missing for your system. Symptom: %s", e.message);
@@ -406,7 +411,6 @@ namespace Frida.Agent {
 #endif
 				}
 			}
-#endif
 
 			main_loop.quit ();
 		}
@@ -465,30 +469,24 @@ namespace Frida.Agent {
 		}
 
 		private static void suspend_subsystems () {
-#if !WINDOWS
 			GumJS.prepare_to_fork ();
 			Gum.prepare_to_fork ();
 			GIOFork.prepare_to_fork ();
 			GLibFork.prepare_to_fork ();
-#endif
 		}
 
 		private static void resume_subsystems () {
-#if !WINDOWS
 			GLibFork.recover_from_fork_in_parent ();
 			GIOFork.recover_from_fork_in_parent ();
 			Gum.recover_from_fork_in_parent ();
 			GumJS.recover_from_fork_in_parent ();
-#endif
 		}
 
 		private static void resume_subsystems_in_child () {
-#if !WINDOWS
 			GLibFork.recover_from_fork_in_child ();
 			GIOFork.recover_from_fork_in_child ();
 			Gum.recover_from_fork_in_child ();
 			GumJS.recover_from_fork_in_child ();
-#endif
 		}
 
 		private void stop_agent_thread () {
@@ -507,6 +505,7 @@ namespace Frida.Agent {
 				pid = fork_parent_pid;
 				injectee_id = fork_parent_injectee_id;
 			} else if (actor == CHILD) {
+#if !WINDOWS
 				yield flush_all_sessions ();
 
 				if (fork_child_socket != null) {
@@ -520,6 +519,9 @@ namespace Frida.Agent {
 
 				pid = fork_child_pid;
 				injectee_id = fork_child_injectee_id;
+#else
+				assert_not_reached ();
+#endif
 			} else {
 				assert_not_reached ();
 			}
@@ -568,7 +570,9 @@ namespace Frida.Agent {
 			fork_child_id = HostChildId (0);
 			fork_parent_injectee_id = 0;
 			fork_child_injectee_id = 0;
+#if !WINDOWS
 			fork_child_socket = null;
+#endif
 
 			transition_mutex.lock ();
 			transition_recovery_state = RECOVERED;

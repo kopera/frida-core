@@ -3356,6 +3356,8 @@ namespace Frida.HostSessionTest {
 				return;
 			}
 
+			h.disable_timeout ();
+			//  var target_path = "C:\\src\\hadoop\\build.cmd";
 			var target_path = "C:\\Program Files\\Git\\bin\\bash.exe";
 
 			try {
@@ -3373,50 +3375,50 @@ namespace Frida.HostSessionTest {
 						msys_fork.callback ();
 				});
 
-				for (var i = 0; i < 1; i++) {
-					// parent
-					{
-						var options = new SpawnOptions ();
-						options.cwd = "C:\\";
-						options.argv = { target_path, "-c", "ls | grep a | grep b | grep c" };
-						var parent_pid = yield device.spawn (target_path, options);
+				// parent
+				{
+					var options = new SpawnOptions ();
+					options.argv = { target_path, Frida.Test.Labrats.path_to_file ("msys-fork.sh") };
+					//  options.argv = { target_path };
+					//  options.cwd = "C:\\src\\hadoop\\";
+					var parent_pid = yield device.spawn (target_path, options);
+					if (GLib.Test.verbose ())
+						printerr ("process started pid=%u path='%s'\n", parent_pid, target_path);
+					var parent_session = yield device.attach (parent_pid);
+					parent_session.detached.connect ((reason, crash) => {
+						assert_null (crash);
+						processes -= 1;
+						if (waiting)
+							msys_fork.callback ();
+					});
+					yield parent_session.enable_child_gating ();
+
+					yield device.resume (parent_pid);
+				}
+
+				// child N
+				while (processes > 0) {
+					var child = children.poll ();
+					if (child == null) {
+						waiting = true;
+						yield;
+						waiting = false;
+					} else {
 						if (GLib.Test.verbose ())
-							printerr ("process started pid=%u path='%s'\n", parent_pid, target_path);
-						var parent_session = yield device.attach (parent_pid);
-						parent_session.detached.connect (reason => {
+							printerr ("process started pid=%u path='%s'\n", child.pid, child.path);
+						var child_session = yield device.attach (child.pid);
+						child_session.detached.connect ((reason, crash) => {
+							if (GLib.Test.verbose ())
+								printerr ("process terminated pid=%u path='%s' reason=%s\n", child.pid, child.path, reason.to_string());
+							assert_null (crash);
 							processes -= 1;
 							if (waiting)
 								msys_fork.callback ();
 						});
-						yield parent_session.enable_child_gating ();
 
-						yield device.resume (parent_pid);
+						yield child_session.enable_child_gating ();
+						yield device.resume (child.pid);
 					}
-
-					// child N
-					while (processes > 0) {
-						var child = children.poll ();
-						if (child == null) {
-							waiting = true;
-							yield;
-							waiting = false;
-						} else {
-							if (GLib.Test.verbose ())
-								printerr ("process started pid=%u path='%s'\n", child.pid, child.path);
-							var child_session = yield device.attach (child.pid);
-							child_session.detached.connect (reason => {
-								if (GLib.Test.verbose ())
-									printerr ("process terminated pid=%u path='%s' reason=%s\n", child.pid, child.path, reason.to_string());
-								processes -= 1;
-								if (waiting)
-									msys_fork.callback ();
-							});
-
-							yield child_session.enable_child_gating ();
-							yield device.resume (child.pid);
-						}
-					}
-
 				}
 
 				yield device_manager.close ();

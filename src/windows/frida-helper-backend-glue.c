@@ -102,7 +102,7 @@ frida_windows_helper_backend_open_process (guint32 pid, GError ** error)
 }
 
 void
-_frida_windows_helper_backend_inject_library_file (HANDLE process_handle, const gchar * path, const gchar * entrypoint,
+_frida_windows_remote_agent_start (HANDLE process_handle, const gchar * path, const gchar * entrypoint,
     const gchar * data, void ** inject_instance, void ** waitable_thread_handle, GError ** error)
 {
   gboolean success = FALSE;
@@ -205,21 +205,21 @@ beach:
 }
 
 void
-_frida_windows_helper_backend_free_inject_instance (void * inject_instance, gboolean * is_resident)
+_frida_windows_remote_agent_free (void * inject_instance)
 {
   FridaInjectInstance * instance = inject_instance;
-  gboolean stay_resident;
-  SIZE_T n_bytes_read;
+  // gboolean stay_resident;
+  // SIZE_T n_bytes_read;
 
-  if (ReadProcessMemory (instance->process_handle, instance->stay_resident_address, &stay_resident, sizeof (stay_resident),
-      &n_bytes_read) && n_bytes_read == sizeof (stay_resident))
-  {
-    *is_resident = stay_resident;
-  }
-  else
-  {
-    *is_resident = FALSE;
-  }
+  // if (ReadProcessMemory (instance->process_handle, instance->stay_resident_address, &stay_resident, sizeof (stay_resident),
+  //     &n_bytes_read) && n_bytes_read == sizeof (stay_resident))
+  // {
+  //   *is_resident = stay_resident;
+  // }
+  // else
+  // {
+  //   *is_resident = FALSE;
+  // }
 
   VirtualFreeEx (instance->process_handle, instance->free_address, 0, MEM_RELEASE);
 

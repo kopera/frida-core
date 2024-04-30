@@ -1,4 +1,4 @@
-[CCode(cprefix = "", cheader_filename = "windows.h")]
+[CCode(cprefix = "")]
 namespace Windows {
 	public const size_t MAX_PATH;
 

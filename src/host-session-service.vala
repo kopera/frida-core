@@ -791,6 +791,14 @@ namespace Frida {
 
 			return id;
 		}
+#else
+		public async void prepare_to_fork (uint parent_pid, Cancellable? cancellable, out uint parent_injectee_id)
+				throws Error, IOError {
+			if (!injectee_by_pid.has_key (parent_pid))
+				throw new Error.INVALID_ARGUMENT ("No injectee found for PID %u", parent_pid);
+			parent_injectee_id = injectee_by_pid[parent_pid];
+			yield injector.demonitor (parent_injectee_id, cancellable);
+		}
 #endif
 
 		public async HostChildId prepare_to_specialize (uint pid, string identifier, Cancellable? cancellable,

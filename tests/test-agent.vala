@@ -578,6 +578,10 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 				out uint child_injectee_id, out GLib.Socket child_socket) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not implemented");
 		}
+#else
+		private async void prepare_to_fork (uint parent_pid, Cancellable? cancellable, out uint parent_injectee_id) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Not implemented");
+		}
 #endif
 
 		public async HostChildId prepare_to_specialize (uint pid, string identifier, Cancellable? cancellable,

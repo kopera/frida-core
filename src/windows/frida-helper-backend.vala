@@ -1,14 +1,122 @@
 namespace Frida {
+	private class WindowsRemoteAgent : Object {
+		public State state {
+			get;
+			private set;
+			default = State.STARTED;
+		}
+
+		public enum State {
+			STARTED,
+			STOPPED,
+			PAUSED
+		}
+
+		private MainContext main_context;
+		private Windows.ProcessHandle target;
+		private string library_path;
+		private string entrypoint;
+		private string data;
+
+		TimeoutSource? paused_timeout;
+
+		private WindowsRemoteAgent (MainContext main_context, Windows.ProcessHandle target, string library_path,
+				string entrypoint, string data) {
+			this.main_context = main_context;
+			this.target = target;
+			this.library_path = library_path;
+			this.entrypoint = entrypoint;
+			this.data = data;
+		}
+
+		~WindowsRemoteAgent () {
+			this.target.close ();
+		}
+
+		internal static async WindowsRemoteAgent start (MainContext main_context, Windows.ProcessHandle target, string library_path,
+				string entrypoint, string data, Cancellable? cancellable) throws Error {
+			var agent = new WindowsRemoteAgent (main_context, target, library_path, entrypoint, data);
+			yield agent.inject (cancellable);
+
+			return agent;
+		}
+
+		private async void inject (Cancellable? cancellable) throws Error {
+			Windows.ThreadHandle agent_thread;
+			void * agent_instance;
+			_start (target, library_path, entrypoint, data, out agent_instance, out agent_thread);
+			state = State.STARTED;
+
+			var idle_source = new IdleSource ();
+			idle_source.set_callback (() => {
+				var wait_source = WaitHandleSource.create (agent_thread, true);
+				wait_source.set_callback (() => {
+					_free (agent_instance);
+
+					if (state != State.PAUSED) {
+						state = State.STOPPED;
+					}
+
+					return Source.REMOVE;
+				});
+				wait_source.attach (main_context);
+
+				return Source.REMOVE;
+			});
+			idle_source.attach (main_context);
+		}
+
+		internal async void demonitor (Cancellable? cancellable)
+			requires (state == State.STARTED)
+		{
+			state = State.PAUSED;
+
+			paused_timeout = new TimeoutSource.seconds (20);
+			paused_timeout.set_callback (() => {
+				if (state == State.PAUSED) {
+					state = State.STOPPED;
+				}
+				return Source.REMOVE;
+			});
+			paused_timeout.attach (main_context);
+		}
+
+		internal async void resume (Cancellable? cancellable)
+			throws Error
+			requires (state == State.PAUSED)
+		{
+			paused_timeout.destroy ();
+
+			try {
+				yield inject (cancellable);
+			} catch (Error e) {
+				printerr ("---> %s\n", e.message);
+				state = State.STOPPED;
+				throw e;
+			}
+		}
+
+		private extern static void _start (Windows.ProcessHandle handle, string path, string entrypoint, string data,
+			out void * agent_instance, out Windows.ThreadHandle agent_thread) throws Error;
+		private extern static void _free (void * agent_instance);
+	}
+
+
 	public class WindowsHelperBackend : Object, WindowsHelper {
 		public PrivilegeLevel level {
 			get;
 			construct;
 		}
 
-		private MainContext main_context;
+		public bool is_idle {
+			get {
+				return agents.is_empty;
+			}
+		}
 
-		private Promise<bool> close_request;
-		private uint pending = 0;
+		private Gee.Map<uint, WindowsRemoteAgent> agents = new Gee.HashMap<uint, WindowsRemoteAgent> ();
+
+		private MainContext main_context;
 
 		private AssetDirectory? asset_dir = null;
 		private Gee.HashMap<string, AssetBundle> asset_bundles = new Gee.HashMap<string, AssetBundle> ();
@@ -22,25 +130,14 @@ namespace Frida {
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
-			while (close_request != null) {
-				try {
-					yield close_request.future.wait_async (cancellable);
-					return;
-				} catch (GLib.Error e) {
-					assert (e is IOError.CANCELLED);
-					cancellable.set_error_if_cancelled ();
-				}
-			}
-			close_request = new Promise<bool> ();
-
-			if (pending > 0) {
-				try {
-					yield close_request.future.wait_async (cancellable);
-				} catch (Error e) {
-					assert_not_reached ();
-				}
-			} else {
-				close_request.resolve (true);
+			if (!is_idle) {
+				var idle_handler = this.notify["is-idle"].connect (() => {
+					if (is_idle) {
+						close.callback ();
+					}
+				});
+				yield;
+				disconnect (idle_handler);
 			}
 
 			asset_bundles.clear ();
@@ -49,9 +146,20 @@ namespace Frida {
 
 		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
 				string[] dependencies, uint id, Cancellable? cancellable) throws Error {
+			string library_path = yield library_file_path (pid, path_template, dependencies, cancellable);
+			var process = open_process (pid);
+			try {
+				yield prepare_target (pid, process, cancellable);
+				yield inject_target (id, process, library_path, entrypoint, data, cancellable);
+			} catch (Error e) {
+				process.close ();
+				throw e;
+			}
+		}
+
+		private async string library_file_path (uint pid, PathTemplate path_template, string[] dependencies, Cancellable? cancellable) throws Error {
 			string path = path_template.expand (WindowsProcess.is_x64 (pid) ? "64" : "32");
 
-			string target_dependent_path;
 			if (level == ELEVATED) {
 				if (asset_dir == null)
 					asset_dir = new AssetDirectory (cancellable);
@@ -60,29 +168,9 @@ namespace Frida {
 					bundle = new AssetBundle.with_copy_of (path, dependencies, asset_dir, cancellable);
 					asset_bundles[path] = bundle;
 				}
-				target_dependent_path = bundle.files.first ().get_path ();
+				return bundle.files.first ().get_path ();
 			} else {
-				target_dependent_path = path;
-			}
-
-			var process = open_process (pid);
-			try {
-				yield prepare_target (pid, process, cancellable);
-
-				void * instance, waitable_thread_handle;
-				_inject_library_file (process, target_dependent_path, entrypoint, data, out instance, out waitable_thread_handle);
-				if (waitable_thread_handle != null) {
-					pending++;
-
-					var source = new IdleSource ();
-					source.set_callback (() => {
-						monitor_remote_thread (id, instance, waitable_thread_handle);
-						return false;
-					});
-					source.attach (main_context);
-				}
-			} finally {
-				process.close ();
+				return path;
 			}
 		}
 
@@ -116,6 +204,9 @@ namespace Frida {
 						}
 		
 						if (event.code == Windows.Debug.EventCode.EXCEPTION) {
+							if (has_msys && event.exception.record.code != 0x406D1388)
+								printerr("process waiting for msys initialization pid=%u\n", pid);
+
 							// When the debugger starts a new target application, an initial breakpoint automatically
 							// occurs after the main image and all statically-linked DLLs are loaded before any DLL
 							// initialization routines are called.
@@ -136,8 +227,10 @@ namespace Frida {
 							// rely on debug symbols to find the memory location of `cygwin_finished_initializing` and
 							// set a hardware breakpoint there.
 							if (!has_msys
-									|| event.exception.record.code == 0x406D1388
+									|| (has_msys && event.exception.record.code == 0x406D1388)
 									|| (Windows.Debug.ExceptionEvent.Flags.NONCONTINUABLE in event.exception.record.flags)) {
+								if (has_msys && event.exception.record.code == 0x406D1388)
+									printerr("process completed msys initialization pid=%u\n", pid);
 								Windows.Debug.@continue(event.process_id, event.thread_id,
 									Windows.Debug.ContinueStatus.EXCEPTION_NOT_HANDLED);
 								break;
@@ -158,28 +251,39 @@ namespace Frida {
 			yield;
 		}
 
-		private void monitor_remote_thread (uint id, void * instance, void * waitable_thread_handle) {
-			var source = WaitHandleSource.create (waitable_thread_handle, true);
-			source.set_callback (() => {
-				bool is_resident;
-				_free_inject_instance (instance, out is_resident);
-
-				uninjected (id);
-
-				pending--;
-				if (close_request != null && pending == 0)
-					close_request.resolve (true);
-
-				return false;
+		private async void inject_target (uint id, Windows.ProcessHandle target, string library_path, string entrypoint, string data, Cancellable? cancellable) throws Error {
+			var agent = yield WindowsRemoteAgent.start (main_context, target, library_path, entrypoint, data, cancellable);
+			agent.notify["state"].connect (() => {
+				printerr ("Agent id: %u state: %s\n", id, agent.state.to_string ());
+				if (agent.state == WindowsRemoteAgent.State.STOPPED) {
+					uninjected (id);
+					agents.unset (id);
+				}
 			});
-			source.attach (main_context);
+			agents[id] = agent;
+		}
+
+		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
+			WindowsRemoteAgent? agent = agents[id];
+			if (agent == null || agent.state != WindowsRemoteAgent.State.STARTED)
+				throw new Error.INVALID_ARGUMENT ("Invalid ID");
+
+			yield agent.demonitor (cancellable);
+		}
+
+		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Not supported on windows");
+		}
+
+		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
+			WindowsRemoteAgent? agent = agents[id];
+			if (agent == null || agent.state != WindowsRemoteAgent.State.PAUSED)
+				throw new Error.INVALID_ARGUMENT ("Invalid ID");
+
+			yield agent.resume (cancellable);
 		}
 
 		private extern static Windows.ProcessHandle open_process (uint pid) throws Error;
-
-		private extern static void _inject_library_file (Windows.ProcessHandle handle, string path, string entrypoint, string data,
-			out void * inject_instance, out void * waitable_thread_handle) throws Error;
-		private extern static void _free_inject_instance (void * inject_instance, out bool is_resident);
 	}
 
 	private class AssetDirectory {
@@ -296,6 +400,6 @@ namespace Frida {
 	}
 
 	namespace WaitHandleSource {
-		public extern Source create (void * handle, bool owns_handle);
+		internal extern Source create (Windows.Handle handle, bool owns_handle);
 	}
 }
