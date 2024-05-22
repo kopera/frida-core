@@ -126,6 +126,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Linux/Golang/should-use-own-stack", () => {
+			var h = new Harness ((h) => Linux.golang_own_stack.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Linux/Manual/spawn-android-app", () => {
 			var h = new Harness ((h) => Linux.Manual.spawn_android_app.begin (h as Harness));
 			h.run ();
@@ -1626,6 +1631,64 @@ namespace Frida.HostSessionTest {
 
 		private static async void bad_then_good_exec (Harness h) {
 			yield Unix.run_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), "spawn-bad-then-good-path", "execv");
+		}
+
+		private static async void golang_own_stack (Harness h) {
+			var backend = new LinuxHostSessionBackend ();
+
+			var prov = yield h.setup_local_backend (backend);
+
+			try {
+				Cancellable? cancellable = null;
+
+				var host_session = yield prov.create (null, cancellable);
+
+				uint pid = 0;
+				bool waiting = false;
+
+				var options = HostSpawnOptions ();
+				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("gopher"), options, cancellable);
+
+				var session_id = yield host_session.attach (pid, make_parameters_dict (), cancellable);
+				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
+
+				string received_message = null;
+				var message_handler = h.message_from_script.connect ((script_id, message, data) => {
+					received_message = message;
+					if (waiting)
+						golang_own_stack.callback ();
+				});
+
+				yield host_session.resume (pid, cancellable);
+
+				var script_id = yield session.create_script ("""
+					const recurseA = DebugSymbol.getFunctionByName("main.recurseA");
+					Interceptor.attach(recurseA, (args) => {
+						send({ event: "enter" });
+					});
+					""", make_parameters_dict (), cancellable);
+				yield session.load_script (script_id, cancellable);
+
+				for (int i = 0; i < 1000; i ++) {
+					if (received_message == null) {
+						waiting = true;
+						yield;
+						waiting = false;
+					}
+					assert_true (received_message == "{\"type\":\"send\",\"payload\":{\"event\":\"enter\"}}");
+					received_message = null;
+				}
+				h.disconnect (message_handler);
+
+				yield host_session.kill (pid, cancellable);
+			} catch (GLib.Error e) {
+				printerr ("Unexpected error: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			yield h.teardown_backend (backend);
+
+			h.done ();
 		}
 
 		namespace Manual {
