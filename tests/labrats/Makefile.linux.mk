@@ -148,4 +148,7 @@ $(eval $(call declare-executable,spawner,spawner-unix.c,-ldl))
 	mips64el-linux-gnuabi64-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
+gopher-linux-x86_64: gopher.go
+	go build -o $@ $(addprefix ./,$^)
+
 .PHONY: all

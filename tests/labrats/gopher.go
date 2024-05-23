@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"runtime/debug"
 	_ "net" // needed to make frida work so that binary is dynamically linked
 )
 
 func main() {
+	debug.SetTraceback("crash")
 	busyLoop(context.Background(), new(int))
 }
 
