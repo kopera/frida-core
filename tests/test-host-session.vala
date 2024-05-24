@@ -1675,9 +1675,11 @@ namespace Frida.HostSessionTest {
 						yield;
 						waiting = false;
 					}
+					printerr (".");
 					assert_true (received_message == "{\"type\":\"send\",\"payload\":{\"event\":\"enter\"}}");
 					received_message = null;
 				}
+				printerr ("\n");
 				h.disconnect (message_handler);
 
 				yield host_session.kill (pid, cancellable);
